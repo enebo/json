@@ -738,6 +738,17 @@ class JSONParserTest < Test::Unit::TestCase
     assert_equal({'foo'=>'bar'}, parse('    { "foo"  :   "bar"   }   '))
   end
 
+  def test_parse_object_keys_frozen
+    res = parse('{"foo":"bar"}')
+    assert res.keys[0].frozen?
+    assert !res["foo"].frozen?
+
+    # Escaped strings take different codepaths in C and JRuby parsers
+    res = parse('{"fo\to": "bar"}')
+    assert res.keys[0].frozen?
+    assert !res["fo\to"].frozen?
+  end
+
   class SubHash < Hash
     def []=(k, v)
       @item_set = true

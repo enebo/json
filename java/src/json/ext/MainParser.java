@@ -543,6 +543,7 @@ public class MainParser {
     }
 
     protected IRubyObject parseString(ThreadContext context, StateElement holder) {
+        boolean isObjectKey = holder.state == OBJECT_KEY;
         int c = advance();
         int stringContextStart = sourceIndex;
 
@@ -554,7 +555,7 @@ public class MainParser {
                     if (options.allowControlCharacters) break;
                     throw parserError(context, "hit EOF before end of string");
                 case '\\': // slow path we have to process escapes and cannot just track indices for str creation.
-                    return parseEscapedString(context, stringContextStart);
+                    return parseEscapedString(context, stringContextStart, isObjectKey);
                 default:
                     if (c < 0x20) {
                         if (!options.allowControlCharacters) {
@@ -577,10 +578,10 @@ public class MainParser {
                 throw parserError(context, "string unexpected state: " + holder.state);
         }
 
-        return createNewString(context, stringContextStart, holder.state == OBJECT_KEY);
+        return createNewString(context, stringContextStart, isObjectKey);
     }
 
-    private IRubyObject parseEscapedString(ThreadContext context, int stringStartIndex) {
+    private IRubyObject parseEscapedString(ThreadContext context, int stringStartIndex, boolean isObjectKey) {
         int prefaceLength = sourceIndex - stringStartIndex;
 
         ByteList buf;
@@ -618,7 +619,7 @@ public class MainParser {
             }
         }
 
-        return createNewString(context, buf);
+        return createNewString(context, buf, isObjectKey);
     }
 
     /* ( ^(["\\]|0..0x1f) | '\\'["\\/bfnrt] | '\\u'[0-9a-fA-F]{4} | '\\'^(["\\/bfnrtu]|0..0x1f) */
@@ -802,12 +803,12 @@ public class MainParser {
     }
 
     // For simple strings without escaping.  We want to avoid copies if it is a key since that will be deduped anyway.
-    private IRubyObject createNewString(ThreadContext context, int stringContextStart, boolean noCopy) {
-        IRubyObject str = noCopy ?
+    private IRubyObject createNewString(ThreadContext context, int stringContextStart, boolean isObjectKey) {
+        IRubyObject str = isObjectKey ?
                 RubyString.newStringNoCopy(context.runtime, source, stringContextStart, sourceIndex - stringContextStart, UTF8Encoding.INSTANCE) :
                 RubyString.newString(context.runtime, source, stringContextStart, sourceIndex - stringContextStart, UTF8Encoding.INSTANCE);
 
-        if (options.freeze) str = freezeString(context, str);
+        if (isObjectKey || options.freeze) str = freezeString(context, str);
 
         return str;
     }
@@ -817,10 +818,10 @@ public class MainParser {
     }
 
     // For escaped strings so we have already allocated a ByteList and do not want to copy.
-    private IRubyObject createNewString(ThreadContext context, ByteList contents) {
+    private IRubyObject createNewString(ThreadContext context, ByteList contents, boolean isObjectKey) {
         IRubyObject str = RubyString.newString(context.runtime, contents);
 
-        if (options.freeze) str = freezeString(context, str);
+        if (isObjectKey || options.freeze) str = freezeString(context, str);
 
         return str;
     }
