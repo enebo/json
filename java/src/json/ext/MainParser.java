@@ -1,6 +1,5 @@
 package json.ext;
 
-import jnr.ffi.annotations.In;
 import org.jcodings.specific.USASCIIEncoding;
 import org.jcodings.specific.UTF8Encoding;
 import org.jruby.Ruby;
@@ -163,12 +162,7 @@ public class MainParser {
         if (size == 0) throw parserError(context, "empty source");
         IRubyObject result = parseInner(context);
         if (result == null) throw parserError(context, "no JSON present");
-        int c = skipWhitespace(advance());
-        if (c == '/') {
-            parseComment(context, stateStack[stateStackIndex], true);
-            advance();
-        }
-
+        skipWhitespace(context, advance(), stateStack[stateStackIndex]);
         if (peek(0) != EOF) throw parserError(context, "unexpected extra stuff");
 
         return result;
@@ -180,7 +174,7 @@ public class MainParser {
         IRubyObject value = null;
 
         for (int c = peek(0); true; c = advance()) {
-            c = skipWhitespace(c);
+            c = skipWhitespace(context, c, holder);
 
             if (DEBUG) System.out.println("advance " + (char) c + " ,STATE: " + holder.state + " ,KEY: " + key + " ,VALUE: " + value);
             switch (c) {
@@ -265,9 +259,6 @@ public class MainParser {
                 case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
                     value = onLoad(context, parseNumber2(context, holder, c, false));
                     break;
-                case '/':
-                    parseComment(context, holder, false);
-                    break;
                 case 't':
                     value = parseTrue(context, holder);
                     break;
@@ -302,7 +293,7 @@ public class MainParser {
         return newException(context, "ParserError", message);
     }
 
-    private int skipWhitespace(int c) {
+    private int skipWhitespace(ThreadContext context, int c, StateElement holder) {
         while (true) {
             switch (c) {
                 case ' ':
@@ -311,6 +302,9 @@ public class MainParser {
                 case '\r':
                     c = advance();
                     break;
+                case '/':
+                    c = parseComment(context, holder);
+                    continue;
                 default:
                     return c;
             }
@@ -352,17 +346,15 @@ public class MainParser {
         return context.tru;
     }
 
-    private void parseComment(ThreadContext context, StateElement holder, boolean trailingComment) {
-        if (!trailingComment && holder.state == ELEMENT) throw parserError(context, "comment for no JSON");
+    private int parseComment(ThreadContext context, StateElement holder) {
+        if (!options.allowComments) noCommentsHandler(context);
+        if (!options.allowComments && holder.state == ELEMENT) throw parserError(context, "comment for no JSON");
 
         int c = advance();
         switch (c) {
             case '*':       // /* ... */ - C comment
                 for (c = advance(); c != EOF; c = advance()) {
-                    if (c == '*' && peek(1) == '/') {
-                        advance(1);
-                        return;
-                    }
+                    if (c == '*' && peek(1) == '/') return advance(2);
                 }
                 throw parserError(context, "unterminated comment, expected closing '*/'");
             case '/': // // Java/C++ comment
@@ -371,13 +363,27 @@ public class MainParser {
                         case '\n':
                         case '\f':
                         case '\r':
-                            return;
+                            return advance();
                         case EOF:
                             break;
                     }
                 }
             default:
                 throw parserError(context, "unexpected char " + c);
+        }
+    }
+
+    // Lack of a good name here but we either error because we do not allow comments or we grudglingly accept them with a warning.
+    private void noCommentsHandler(ThreadContext context) {
+        if (options.deprecateComments) {
+            if (options.deprecateDuplicateKey && emittedDeprecations < 5) {
+                emittedDeprecations++;
+                context.runtime.getWarnings().warning(
+                        "Encountered comment in JSON. This will raise an error in json 3.0 unless enabled via `allow_comments: true`"
+                );
+            }
+        } else {
+            throw parserError(context, "unexpected comment");
         }
     }
 

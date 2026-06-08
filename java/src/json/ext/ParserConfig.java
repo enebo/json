@@ -30,17 +30,19 @@ import static org.jruby.util.StringSupport.CR_7BIT;
  */
 public class ParserConfig extends RubyObject {
     // Any special features we want to parse with?
-    public int maxNesting = 100;
-    public boolean allowNaN = false;
-    public boolean allowTrailingComma = false;
-    public boolean allowControlCharacters = false;
-    public boolean allowInvalidEscape = false;
-    public boolean allowDuplicateKey = false;
-    public boolean deprecateDuplicateKey = true;
-    public boolean symbolizeNames = false;
-    public boolean freeze = false;
-    public RubyProc onLoad = null;
-    public RubyClass decimalClass = null;
+    int maxNesting = 100;
+    boolean allowNaN = false;
+    boolean allowTrailingComma = false;
+    boolean allowComments = true;
+    boolean deprecateComments = true;
+    boolean allowControlCharacters = false;
+    boolean allowInvalidEscape = false;
+    boolean allowDuplicateKey = false;
+    boolean deprecateDuplicateKey = true;
+    boolean symbolizeNames = false;
+    boolean freeze = false;
+    RubyProc onLoad = null;
+    RubyClass decimalClass = null;
 
     static final ObjectAllocator ALLOCATOR = ParserConfig::new;
 
@@ -84,6 +86,11 @@ public class ParserConfig extends RubyObject {
                 case "allow_duplicate_key": {
                     options.allowDuplicateKey = value.isTrue();
                     options.deprecateDuplicateKey = false;
+                    break;
+                }
+                case "allow_comments": {
+                    options.allowComments = value.isTrue();
+                    options.deprecateComments = false;
                     break;
                 }
             }
