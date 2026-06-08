@@ -347,8 +347,7 @@ public class MainParser {
     }
 
     private int parseComment(ThreadContext context, StateElement holder) {
-        if (!options.allowComments) noCommentsHandler(context);
-        if (!options.allowComments && holder.state == ELEMENT) throw parserError(context, "comment for no JSON");
+        if (!options.allowComments) noCommentsHandler(context, holder);
 
         int c = advance();
         switch (c) {
@@ -374,7 +373,9 @@ public class MainParser {
     }
 
     // Lack of a good name here but we either error because we do not allow comments or we grudglingly accept them with a warning.
-    private void noCommentsHandler(ThreadContext context) {
+    private void noCommentsHandler(ThreadContext context, StateElement holder) {
+        if (holder.state == ELEMENT) throw parserError(context, "comment for no JSON");
+
         if (options.deprecateComments) {
             if (options.deprecateDuplicateKey && emittedDeprecations < 5) {
                 emittedDeprecations++;
