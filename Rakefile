@@ -84,8 +84,6 @@ namespace :ci do
 end
 
 JAVA_DIR            = "java/src/json/ext"
-JAVA_RAGEL_PATH     = "#{JAVA_DIR}/ParserConfig.rl"
-JAVA_PARSER_SRC     = "#{JAVA_DIR}/ParserConfig.java"
 JAVA_SOURCES        = FileList["#{JAVA_DIR}/*.java"].exclude("#{JAVA_DIR}/Vectorized*.java")
 JAVA_VEC_SOURCES    = FileList["#{JAVA_DIR}/Vectorized*.java"]
 JAVA_CLASSES        = []
@@ -95,8 +93,6 @@ JRUBY_GENERATOR_JAR = File.expand_path("lib/json/ext/generator.jar")
 CLEAN.concat FileList["java/src/**/*.class"]
 CLEAN << JRUBY_PARSER_JAR
 CLEAN << JRUBY_GENERATOR_JAR
-
-CLOBBER << JAVA_PARSER_SRC
 
 which = lambda { |c|
   w = `which #{c}`
@@ -111,19 +107,6 @@ else
   RAGEL_CODEGEN     = %w[rlcodegen rlgen-cd ragel].find(&which)
   RAGEL_DOTGEN      = %w[rlgen-dot rlgen-cd ragel].find(&which)
 end
-
-file JAVA_PARSER_SRC => JAVA_RAGEL_PATH do
-  cd JAVA_DIR do
-    if RAGEL_CODEGEN == 'ragel'
-      sh "ragel ParserConfig.rl -J -o ParserConfig.java"
-    else
-      sh "ragel -x ParserConfig.rl | #{RAGEL_CODEGEN} -J"
-    end
-  end
-end
-
-desc "Generate parser with ragel"
-task :ragel => [JAVA_PARSER_SRC]
 
 if defined?(RUBY_ENGINE) and RUBY_ENGINE == 'jruby'
   path_separator = File::PATH_SEPARATOR
@@ -159,7 +142,7 @@ if defined?(RUBY_ENGINE) and RUBY_ENGINE == 'jruby'
     JAVA_VEC_SOURCES.each do |src|
       obj = src.sub(/\.java\Z/, '.class')
       file obj => src do
-        sh 'javac', '--add-modules', 'jdk.incubator.vector', '-classpath', classpath, '--release', '16', src do |success, status|
+        sh 'javac', '--add-modules', 'jdk.incubator.vector', '-classpath', classpath, '--release', '16', src do |success, status| 
           if success
             puts "*** 'jdk.incubator.vector' support enabled ***"
           else
@@ -174,7 +157,7 @@ if defined?(RUBY_ENGINE) and RUBY_ENGINE == 'jruby'
   end
 
   desc "Compiling jruby extension"
-  task :compile => [:ragel] + JAVA_CLASSES
+  task :compile => JAVA_CLASSES
 
   desc "Package the jruby gem"
   task :jruby_gem => :create_jar do
@@ -191,15 +174,16 @@ if defined?(RUBY_ENGINE) and RUBY_ENGINE == 'jruby'
   desc "Testing library (jruby)"
   task :test => [:create_jar ]
 
-  file JRUBY_PARSER_JAR => :compile do
+  file JRUBY_PARSER_JAR => JAVA_CLASSES do
     cd 'java/src' do
       parser_classes = FileList[
         "json/ext/ByteList*.class",
+        "json/ext/Option*.class",
         "json/ext/OptionsReader*.class",
-        "json/ext/Parser*.class",
+        "json/ext/*Parser*.class",
         "json/ext/RuntimeInfo*.class",
-        "json/ext/StringDecoder*.class",
-        "json/ext/Utils*.class"
+        "json/ext/Utils*.class",
+        "json/ext/Ryu.class"
       ]
       sh 'jar', 'cf', File.basename(JRUBY_PARSER_JAR), *parser_classes
       mv File.basename(JRUBY_PARSER_JAR), File.dirname(JRUBY_PARSER_JAR)
