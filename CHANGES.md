@@ -2,6 +2,12 @@
 
 ### Unreleased
 
+* Deprecate default support of JavaScript comments in the parser and add `allow_comments: true` parsing option.
+* Integrate with Ruby 4.1 `ruby_sized_xfree`.
+
+### 2026-06-03 (2.19.8)
+
+* Fix 1-byte buffer overread on EOS errors.
 * Handle invalid types passed as `max_nesting` option.
 
 ### 2026-05-28 (2.19.7)

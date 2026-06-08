@@ -4,6 +4,7 @@ gemspec
 
 group :development do
   gem "ruby_memcheck" if RUBY_PLATFORM =~ /linux/i
+  gem "bigdecimal"
   gem "ostruct"
   gem "rake"
   gem "rake-compiler"
