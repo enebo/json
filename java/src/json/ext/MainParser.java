@@ -41,7 +41,6 @@ public class MainParser {
     private static final byte[] NAN = new byte[]{'N', 'a', 'N'};
     private static final byte[] INFINITY = new byte[]{'I', 'n', 'f', 'i', 'n', 'i', 't', 'y'};
 
-
     protected final ParserConfig options;
     private final int size;
     private final byte[] source;
@@ -257,7 +256,7 @@ public class MainParser {
                     value = onLoad(context, parseNegativeNumber(context, holder));
                     break;
                 case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
-                    value = onLoad(context, parseNumber2(context, holder, c, false));
+                    value = onLoad(context, parseNumber(context, holder, c, false));
                     break;
                 case 't':
                     value = parseTrue(context, holder);
@@ -388,129 +387,18 @@ public class MainParser {
         }
     }
 
-    // returns true if negative
-    private boolean parseSign(int c) {
-        boolean negative = false;
-        if (c == '-') {
-            advance();
-            negative = true;
-        } else if (c == '+') {
-            advance();
-        }
-        return negative;
-    }
-
     protected IRubyObject parseNegativeNumber(ThreadContext context, StateElement holder) {
         int c = advance();
         if (c == 'I' || c == 'N') return parseSpecialNumbers(context, holder, c, true);
         if (!Character.isDigit(c)) throw parserError(context, "unexpected char " + (char) c);
 
-        return parseNumber2(context, holder, c, true);
+        return parseNumber(context, holder, c, true);
     }
 
-    protected IRubyObject parseNumber(ThreadContext context, StateElement holder, int c, boolean negative) {
-        int start = sourceIndex - (negative ? 1 : 0);
-        long integer = 0;
-        int firstDigit = c;
-
-        int mantissaDigits = sourceIndex;
-        for (; c >= '0' && c <= '9'; c = advance()) {
-            integer = integer * 10 + (c - '0');
-        }
-        mantissaDigits = sourceIndex - mantissaDigits;
-
-        if ((firstDigit == '0' && mantissaDigits > 1) || negative && mantissaDigits == 0) {
-            throw parserError(context, "invalid number");
-        }
-
-        if (c == '.' || c == 'E' || c == 'e') {
-            return parseFloatNumber(context, holder, c, start, negative, integer, mantissaDigits);
-        }
-        advance(-1); // We went past the number...back it up.
-        valueCheck(context, holder);
-
-        return mantissaDigits >= MAX_FAST_INTEGER_SIZE ?
-                bigNumValue(context, start) :
-                context.runtime.newFixnum(negative ? -integer : integer);
-    }
-
-    private IRubyObject parseFloatNumber(ThreadContext context, StateElement holder, int c, int start,
-                                         boolean negative, long integer, int mantissaDigits) {
-        long numerator = 0;
-        double denominator = 1.0;
-
-        if (c == '.') {
-            c = advance();
-            if (c < '0' || c > '9') throw parserError(context, "expecting number after '.'" + c);
-
-            int fractionalDigits = sourceIndex;
-            for (; '0' <= c && c <= '9'; c = advance()) {
-                numerator = numerator * 10 + (c - '0');
-                denominator *= 10.0;
-            }
-            mantissaDigits += sourceIndex - fractionalDigits;
-        }
-
-        long exponent = c == 'e' || c == 'E' ? parseExplicitExponent(context) : 0;
-        if (exponent > Long.MAX_VALUE) return infinity(context, negative);
-        advance(-1); // We went past the number...back it up.
-
-        valueCheck(context, holder);
-
-        return options.decimalClass != null ?
-                decimalClassValue(context, start) :
-                RubyFloat.newFloat(context.runtime,
-                        mantissaDigits >= MAX_FAST_INTEGER_SIZE || exponent != 0 ?
-                                Double.parseDouble(new String(source, start, sourceIndex - start + 1)) :
-                                floatingPointValue(negative, integer, numerator, denominator));
-    }
-
-    private long parseExplicitExponent2(ThreadContext context) {
-        long exponent = 0;
-        int c = advance();
-        boolean negativeExponent = parseSign(c);
-        boolean foundValues = false;
-        boolean overflows = false;
-        for (c = peek(0); '0' <= c && c <= '9'; c = advance()) {
-            if (overflows) continue;
-            exponent = exponent * 10 + (c - '0');
-            if (exponent > Integer.MAX_VALUE) overflows = true;
-            foundValues = true;
-        }
-        if (!foundValues) throw parserError(context, "missing exponent value");
-        if (negativeExponent) exponent = -exponent;
-        return exponent;
-    }
-
-    private long parseExplicitExponent(ThreadContext context) {
-        long exponent = 0;
-        int c = advance();
-        boolean negativeExponent = parseSign(c);
-        int start = sourceIndex;
-        for (c = peek(0); '0' <= c && c <= '9'; c = advance()) {
-            exponent = exponent * 10 + (c - '0');
-        }
-        int exponentDigits = sourceIndex - start;
-        if (exponentDigits == 0) throw parserError(context, "invalid number");
-
-        if (exponentDigits >= 20 || exponent > Long.MAX_VALUE) {
-            exponent = negativeExponent ? Long.MIN_VALUE : Long.MAX_VALUE;
-        } else if (negativeExponent) {
-            exponent = -exponent;
-        }
-        return exponent;
-    }
     private RubyBignum bigNumValue(ThreadContext context, int start) {
         return RubyBignum.newBignum(context.runtime, new String(source, start, sourceIndex - start + 1));
     }
-
-    private static double floatingPointValue(boolean negative, double integer, double numerator, double denominator) {
-        double value = integer + numerator / denominator;
-        if (negative) value = -value;
-        //if (exponent != 0) value *= Math.pow(10.0, exponent);
-        return value;
-    }
-
+    
     private IRubyObject decimalClassValue(ThreadContext context, int start) {
         Ruby runtime = context.runtime;
         RubyString meat = runtime.newString(new ByteList(source, start, sourceIndex - start + 1, USASCIIEncoding.INSTANCE, false));
@@ -895,7 +783,7 @@ public class MainParser {
                 result;
     }
 
-    IRubyObject parseNumber2(ThreadContext context, StateElement holder, int c, boolean negative) {
+    IRubyObject parseNumber(ThreadContext context, StateElement holder, int c, boolean negative) {
         int start = sourceIndex - (negative ? 1 : 0);
         boolean integer = true;
         int first_digit = c;
