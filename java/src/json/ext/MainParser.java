@@ -16,8 +16,6 @@ import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.builtin.IRubyObject;
 import org.jruby.util.ByteList;
 
-import java.util.ArrayList;
-
 import static json.ext.MainParser.ParserState.*;
 import static json.ext.Ryu.ryuS2dFromParts;
 import static json.ext.Utils.newException;
@@ -692,18 +690,23 @@ public class MainParser {
         return hash;
     }
 
+    // This implementation uses a homegrown sorted list rather than a Java data structure because we know that
+    // the bounds of the cache is fixed and that the entries will either be at cacheLength (e.g. an add at that
+    // index) or it will need to insert into the existing list.  Besides saving the allocation and other various
+    // fields for the bells and whistles you get using Vector or ArrayList it also eliminates bounds checking
+    // we know we won't need.
     private static final int CACHE_CAPACITY = 63;
-    private final ArrayList<RubyString> stringCache = new ArrayList<>(CACHE_CAPACITY);
+    private final RubyString[] cache = new RubyString[CACHE_CAPACITY];
+    private int cacheLength = 0;
 
-    private RubyString cacheFetch(ThreadContext context, int start, int length) {
-        int cacheLength = stringCache.size();
+    private RubyString cacheFetch(ThreadContext context, int stringStart, int stringLength) {
         int low = 0;
         int high = cacheLength - 1;
 
         while (low <= high) {
             int mid = (high + low) >> 1;
-            RubyString entry = stringCache.get(mid);
-            int cmp = cacheCmp(start, length, entry);
+            RubyString entry = cache[mid];
+            int cmp = cacheCmp(stringStart, stringLength, entry);
 
             if (cmp == 0) {
                 return entry;
@@ -714,9 +717,13 @@ public class MainParser {
             }
         }
 
-        RubyString string = context.runtime.freezeAndDedupString(RubyString.newString(context.runtime, source, start, sourceIndex - start, UTF8Encoding.INSTANCE));
+        RubyString string = context.runtime.freezeAndDedupString(RubyString.newString(context.runtime, source, stringStart, sourceIndex - stringStart, UTF8Encoding.INSTANCE));
 
-        if (cacheLength < CACHE_CAPACITY) stringCache.add(low, string);
+        if (cacheLength < CACHE_CAPACITY) { // JVM did not inline a small method for this code snippet so it is manually inlined.
+            if (low < cacheLength) System.arraycopy(cache, low, cache, low + 1, cacheLength - low);
+            cache[low] = string;
+            cacheLength++;
+        }
 
         return string;
     }
