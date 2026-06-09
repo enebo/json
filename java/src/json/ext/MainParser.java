@@ -16,6 +16,8 @@ import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.builtin.IRubyObject;
 import org.jruby.util.ByteList;
 
+import java.util.ArrayList;
+
 import static json.ext.MainParser.ParserState.*;
 import static json.ext.Ryu.ryuS2dFromParts;
 import static json.ext.Utils.newException;
@@ -371,7 +373,7 @@ public class MainParser {
         }
     }
 
-    // Lack of a good name here but we either error because we do not allow comments or we grudglingly accept them with a warning.
+    // Lack of a good name here but we either error because we do not allow comments or we grudgingly accept them with a warning.
     private void noCommentsHandler(ThreadContext context, StateElement holder) {
         if (holder.state == ELEMENT) throw parserError(context, "comment for no JSON");
 
@@ -398,7 +400,7 @@ public class MainParser {
     private RubyBignum bigNumValue(ThreadContext context, int start) {
         return RubyBignum.newBignum(context.runtime, new String(source, start, sourceIndex - start + 1));
     }
-    
+
     private IRubyObject decimalClassValue(ThreadContext context, int start) {
         Ruby runtime = context.runtime;
         RubyString meat = runtime.newString(new ByteList(source, start, sourceIndex - start + 1, USASCIIEncoding.INSTANCE, false));
@@ -690,13 +692,71 @@ public class MainParser {
         return hash;
     }
 
+    private static final int CACHE_CAPACITY = 63;
+    private final ArrayList<RubyString> stringCache = new ArrayList<>(CACHE_CAPACITY);
+
+    private RubyString cacheFetch(ThreadContext context, int start, int length) {
+        int cacheLength = stringCache.size();
+        int low = 0;
+        int high = cacheLength - 1;
+
+        while (low <= high) {
+            int mid = (high + low) >> 1;
+            RubyString entry = stringCache.get(mid);
+            int cmp = cacheCmp(start, length, entry);
+
+            if (cmp == 0) {
+                return entry;
+            } else if (cmp > 0) {
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        RubyString string = context.runtime.freezeAndDedupString(RubyString.newString(context.runtime, source, start, sourceIndex - start, UTF8Encoding.INSTANCE));
+
+        if (cacheLength < CACHE_CAPACITY) stringCache.add(low, string);
+
+        return string;
+    }
+
+    private int cacheCmp(int start, int length, RubyString entry) {
+        ByteList bytes = entry.getByteList();
+        int entryLength = bytes.length();
+
+        return entryLength == length ?
+                compareEntryWith(bytes, start, length) :
+                length - entryLength;
+    }
+
+    private int compareEntryWith(ByteList bytes, int start, int length) {
+        byte[] str = bytes.unsafeBytes();
+        int to = start;
+        int po = bytes.begin();
+        int pc = length;
+
+        while (--pc >= 0) {
+            int test = source[to] - str[po];
+            if (test != 0) return test < 0 ? 1 : -1;
+            to++;
+            po++;
+        }
+        return 0;
+    }
+
     // For simple strings without escaping.  We want to avoid copies if it is a key since that will be deduped anyway.
     private IRubyObject createNewString(ThreadContext context, int stringContextStart, boolean isObjectKey) {
-        IRubyObject str = isObjectKey ?
-                RubyString.newStringNoCopy(context.runtime, source, stringContextStart, sourceIndex - stringContextStart, UTF8Encoding.INSTANCE) :
-                RubyString.newString(context.runtime, source, stringContextStart, sourceIndex - stringContextStart, UTF8Encoding.INSTANCE);
-
-        if (isObjectKey || options.freeze) str = freezeString(context, str);
+        int length = sourceIndex - stringContextStart;
+        if (isObjectKey) {
+            if (length < 53) {
+                return cacheFetch(context, stringContextStart, length);
+            } else {
+                return freezeString(context, RubyString.newString(context.runtime, source, stringContextStart, sourceIndex - stringContextStart, UTF8Encoding.INSTANCE));
+            }
+        }
+        IRubyObject str = RubyString.newString(context.runtime, source, stringContextStart, sourceIndex - stringContextStart, UTF8Encoding.INSTANCE);
+        if ( options.freeze) str = freezeString(context, str);
 
         return str;
     }
