@@ -706,7 +706,11 @@ public class MainParser {
         while (low <= high) {
             int mid = (high + low) >> 1;
             RubyString entry = cache[mid];
-            int cmp = cacheCmp(stringStart, stringLength, entry);
+            ByteList bytes = entry.getByteList();
+            int entryLength = bytes.length();
+            int cmp = entryLength == stringLength ?
+                    compareEntryWith(bytes, stringStart, stringLength) :
+                    stringLength - entryLength;
 
             if (cmp == 0) {
                 return entry;
@@ -726,15 +730,6 @@ public class MainParser {
         }
 
         return string;
-    }
-
-    private int cacheCmp(int start, int length, RubyString entry) {
-        ByteList bytes = entry.getByteList();
-        int entryLength = bytes.length();
-
-        return entryLength == length ?
-                compareEntryWith(bytes, start, length) :
-                length - entryLength;
     }
 
     private int compareEntryWith(ByteList bytes, int start, int length) {
