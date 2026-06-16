@@ -207,6 +207,8 @@ public class Parser extends RubyObject {
         private static final int KEY_CACHE_CAPA = 128;
         private static final int KEY_CACHE_MAX_ENTRY_LENGTH = 55;
 
+        private static final long SPACES = 0x2020202020202020L;
+
         private enum FrameType {
             ROOT(FramePhase.DONE),
             ARRAY(FramePhase.ARRAY_COMMA),
@@ -817,7 +819,7 @@ public class Parser extends RubyObject {
             byte[] ebuf = eb.getUnsafeBytes();
             int ebeg = eb.begin();
             for (int i = 0; i < len; i++) {
-                int cmp = (buf[off + i] & 0xFF) - (ebuf[ebeg + i] & 0xFF);
+                int cmp = Byte.toUnsignedInt(buf[off + i]) - Byte.toUnsignedInt(ebuf[ebeg + i]);
                 if (cmp != 0) {
                     return cmp;
                 }
@@ -858,11 +860,10 @@ public class Parser extends RubyObject {
                         // of indentation spaces, so skip them eight at a time.
                         while (cursor + 8 <= end) {
                             long x = chunks.getLong(cursor);
-                            if (x == 0x2020202020202020L) {
+                            if (x == SPACES) {
                                 cursor += 8;
                             } else {
-                                cursor += Long.numberOfTrailingZeros(
-                                    x ^ 0x2020202020202020L) >>> 3;
+                                cursor += Long.numberOfTrailingZeros(x ^ SPACES) >>> 3;
                                 break;
                             }
                         }

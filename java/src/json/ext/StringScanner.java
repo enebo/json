@@ -22,6 +22,10 @@ class StringScanner {
     private static final long HIGH_BITS = 0x8080808080808080L;
     private static final long ONES      = 0x0101010101010101L;
 
+    private static final long SPACES = 0x2020202020202020L;
+    private static final long DOUBLE_QUOTES = 0x2222222222222222L;
+    private static final long BACKSLASHES = 0x5C5C5C5C5C5C5C5CL;
+
     private static final String VECTORIZED_SCANNER_CLASS = "json.ext.VectorizedStringScanner";
     private static final String USE_VECTORIZED_PARSER_PROP = "jruby.json.useVectorizedParser";
     private static final String USE_VECTORIZED_PARSER_DEFAULT = "false";
@@ -111,11 +115,11 @@ class StringScanner {
      * when the whole 8-byte chunk is printable ASCII copyable verbatim.
      */
     private static long stringScanMask(long x) {
-        long control = (x - 0x2020202020202020L) & ~x; // bytes < 0x20 (ASCII)
+        long control = (x - SPACES) & ~x; // bytes < 0x20 (ASCII)
         long high    = x;                              // bit 0x80 set iff non-ASCII
-        long q       = x ^ 0x2222222222222222L;
+        long q       = x ^ DOUBLE_QUOTES;
         long quote   = (q - ONES) & ~q;
-        long s       = x ^ 0x5C5C5C5C5C5C5C5CL;
+        long s       = x ^ BACKSLASHES;
         long bslash  = (s - ONES) & ~s;
         return (control | high | quote | bslash) & HIGH_BITS;
     }
@@ -127,9 +131,9 @@ class StringScanner {
      * UTF-8) eight bytes at a time.
      */
     private static long quoteBackslashMask(long x) {
-        long q      = x ^ 0x2222222222222222L;
+        long q      = x ^ DOUBLE_QUOTES;
         long quote  = (q - ONES) & ~q;
-        long s      = x ^ 0x5C5C5C5C5C5C5C5CL;
+        long s      = x ^ BACKSLASHES;
         long bslash = (s - ONES) & ~s;
         return (quote | bslash) & HIGH_BITS;
     }
