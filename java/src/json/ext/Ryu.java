@@ -672,41 +672,6 @@ public class Ryu {
         return pLo;
     }
 
-    public static long multiplyHigh(long x, long y) {
-        // Use technique from section 8-2 of Henry S. Warren, Jr.,
-        // Hacker's Delight (2nd ed.) (Addison Wesley, 2013), 173-174.
-        long x1 = x >> 32;
-        long x2 = x & 0xFFFFFFFFL;
-        long y1 = y >> 32;
-        long y2 = y & 0xFFFFFFFFL;
-
-        long z2 = x2 * y2;
-        long t = x1 * y2 + (z2 >>> 32);
-        long z1 = t & 0xFFFFFFFFL;
-        long z0 = t >> 32;
-        z1 += x2 * y1;
-
-        return x1 * y1 + z0 + (z1 >> 32);
-    }
-
-    /**
-     * Returns as a {@code long} the most significant 64 bits of the unsigned
-     * 128-bit product of two unsigned 64-bit factors.
-     *
-     * @param x the first value
-     * @param y the second value
-     * @return the result
-     * @see #multiplyHigh
-     * @since 18
-     */
-    public static long unsignedMultiplyHigh(long x, long y) {
-        // Compute via multiplyHigh() to leverage the intrinsic
-        long result = multiplyHigh(x, y);
-        result += (y & (x >> 63)); // equivalent to `if (x < 0) result += y;`
-        result += (x & (y >> 63)); // equivalent to `if (y < 0) result += x;`
-        return result;
-    }
-
     static long shiftright128(long lo, long hi, int dist) {
         return (hi << (64 - dist)) | (lo >>> dist);
     }
@@ -725,9 +690,29 @@ public class Ryu {
         return shiftright128(sum, high1, j - 64);
     }
 
-// Main conversion function: decimal mantissa+exponent to IEEE 754 double
-// Optimized for JSON parsing with fast paths for edge cases
+    // Precomputed powers of ten from 10^0 to 10^22. These
+    // can be represented exactly using the double type.
+    private static final double[] POWER_OF_TEN = {
+            1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11,
+            1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+
+    // Main conversion function: decimal mantissa+exponent to IEEE 754 double
+    // Optimized for JSON parsing with fast paths for edge cases
     public static double ryuS2dFromParts(long m10, int m10digits, int e10, boolean signedM) {
+        // From Daniel Lemire's fast_double_parser which is an extraction of part of 'How to Read
+        // Floating Point Numbers Accurately' by Willian D. Clinger: https://www.cs.uoregon.edu/Reports/TR-1990-001.pdf
+        if (-22 <= e10 && e10 <= 22 && Long.compareUnsigned(m10, 9007199254740991L) <= 0) {
+            double value = (double) m10;  // Lossless conversion for 0 <= i <= 2^53 - 1.
+
+            if (e10 < 0) {
+                value /= POWER_OF_TEN[-e10];
+            } else {
+                value *= POWER_OF_TEN[e10];
+            }
+
+            return signedM ? -value : value;
+        }
+
         // Fast path: handle zero explicitly (e.g., "0.0", "0e0") or overflow/underflow early
         if (m10 == 0 || m10digits + e10 <= -324) return signedM ? -0.0 : 0.0;
 
