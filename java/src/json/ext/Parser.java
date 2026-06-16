@@ -34,6 +34,7 @@ import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.function.BiFunction;
 
+import static json.ext.Ryu.ryuS2dFromParts;
 import static org.jruby.util.ConvertDouble.DoubleConverter;
 
 /**
@@ -318,7 +319,8 @@ public class Parser extends RubyObject {
                     case VALUE: {
                         eatWhitespace();
                         IRubyObject value;
-                        switch (peek()) {
+                        byte c = peek();
+                        switch (c) {
                             case 'n':
                                 if (matchKeyword("null")) { value = context.nil; break; }
                                 throw unexpectedToken(cursor, end);
@@ -345,12 +347,12 @@ public class Parser extends RubyObject {
                                 if (config.allowNaN && matchKeyword("Infinity")) {
                                     value = getConstant(CONST_MINUS_INFINITY);
                                 } else {
-                                    value = parseNumber(cursor - 1);
+                                    value = parseNumber(cursor - 1, peek(), true);
                                 }
                                 break;
                             case '0': case '1': case '2': case '3': case '4':
                             case '5': case '6': case '7': case '8': case '9':
-                                value = parseNumber(cursor);
+                                value = parseNumber(cursor, c, false);
                                 break;
                             case '"':
                                 value = parseString(false);
@@ -595,108 +597,84 @@ public class Parser extends RubyObject {
             }
         }
 
-        private IRubyObject parseNumber(int numberStart) {
-            byte first = cursor < end ? data[cursor] : 0;
-            boolean negative = data[numberStart] == '-';
+        private int parseDigits(long value) {
+            int start = cursor;
+            byte c = peek();
+            for (; c >= '0' && c <= '9'; c = advance()) {
+                value = value * 10 + (c - '0');
+            }
+            digitsValue = value;
+            return cursor - start;
+        }
 
-            int intStart = cursor;
-            int p = scanDigits(intStart);
-            int intDigits = p - intStart;
+        private IRubyObject parseNumber(int numberStart, byte first, boolean negative) {
+            int mantissaDigits = parseDigits(0);
             long mantissa = digitsValue;
 
-            if ((first == '0' && intDigits > 1) || intDigits == 0) {
-                cursor = p;
+            if ((first == '0' && mantissaDigits > 1) || mantissaDigits == 0) {
                 throw unexpectedToken(numberStart, end);
             }
 
             boolean integer = true;
+            int decimal_point_pos = -1;
 
-            if (p < end && data[p] == '.') {
+            if (peek() == '.') {
                 integer = false;
-                p++;
-                int fracStart = p;
-                p = scanDigits(fracStart);
-                if (p == fracStart) {
-                    cursor = p;
+                decimal_point_pos = mantissaDigits;
+                cursor++;
+                int fracDigits = parseDigits(mantissa);
+                if (fracDigits == 0) {
                     throw unexpectedToken(numberStart, end);
                 }
+                mantissaDigits += fracDigits;
+                mantissa = digitsValue;
             }
 
-            if (p < end && (data[p] == 'e' || data[p] == 'E')) {
+            int c = peek();
+            long exponent = 0;
+            if (c == 'e' || c == 'E') {
                 integer = false;
-                p++;
-                if (p < end && (data[p] == '+' || data[p] == '-')) p++;
-                int expStart = p;
-                p = scanDigits(expStart);
-                if (p == expStart) {
-                    cursor = p;
+                c = advance();
+                boolean negative_exponent = c == '-';
+                if (negative_exponent || c == '+') advance();
+
+                int exponent_digits = parseDigits(0);
+                long abs_exponent = digitsValue;
+                if (exponent_digits == 0) {
                     throw unexpectedToken(numberStart, end);
                 }
-            }
 
-            cursor = p;
+                if (exponent_digits >= 20 || Long.compareUnsigned(abs_exponent, Long.MAX_VALUE) > 0) {
+                    exponent = negative_exponent ? Long.MIN_VALUE : Long.MAX_VALUE;
+                } else {
+                    exponent = negative_exponent ? -abs_exponent : abs_exponent;
+                }
+            }
 
             if (integer) {
-                if (intDigits < MAX_FAST_INTEGER_SIZE) {
+                if (mantissaDigits < MAX_FAST_INTEGER_SIZE) {
                     return context.runtime.newFixnum(negative ? -mantissa : mantissa);
                 }
-                return ConvertBytes.byteListToInum(context.runtime, absSubSequence(numberStart, p), 10, true);
+                return ConvertBytes.byteListToInum(context.runtime, absSubSequence(numberStart, cursor), 10, true);
             }
-            return config.decimalFactory.apply(context, absSubSequence(numberStart, p));
+
+            // Adjust exponent based on decimal point position
+            if (decimal_point_pos >= 0) exponent -= (mantissaDigits - decimal_point_pos);
+
+           return decodeFloat(context, mantissa, mantissaDigits, exponent, negative, numberStart);
         }
 
-        private int scanDigits(int p) {
-            long acc = 0;
-            while (p + 8 <= end) {
-                long next8 = chunks.getLong(p);
-                // Branchless all-eight-are-digits test (simdjson / 0x80.pl):
-                // each nibble pair resolves to 0x3 iff the byte is '0'..'9'.
-                long match = (next8 & 0xF0F0F0F0F0F0F0F0L)
-                           | (((next8 + 0x0606060606060606L) & 0xF0F0F0F0F0F0F0F0L) >>> 4);
-                if (match == 0x3333333333333333L) {
-                    acc = acc * 100000000L + decode8digits(next8);
-                    p += 8;
-                    continue;
-                }
-                int consecutive = Long.numberOfTrailingZeros(match ^ 0x3333333333333333L) >>> 3;
-                if (consecutive >= 4) {
-                    acc = acc * 10000L + decode4digits((int) next8);
-                    p += 4;
-                    consecutive -= 4;
-                }
-                while (consecutive > 0) {
-                    acc = acc * 10 + (data[p] - '0');
-                    p++;
-                    consecutive--;
-                }
-                digitsValue = acc;
-                return p;
-            }
-            while (p < end && data[p] >= '0' && data[p] <= '9') {
-                acc = acc * 10 + (data[p] - '0');
-                p++;
-            }
-            digitsValue = acc;
-            return p;
-        }
+        IRubyObject decodeFloat(ThreadContext context, long mantissa, int mantissa_digits, long exponent, boolean negative, int start) {
+            if (config.decimalClass != null) return config.decimalFactory.apply(context, absSubSequence(start, cursor));
+            if (exponent > Integer.MAX_VALUE) return getConstant(negative ? CONST_MINUS_INFINITY : CONST_INFINITY);
+            if (exponent < Integer.MIN_VALUE) return RubyFloat.newFloat(context.runtime, negative ? -0.0 : 0.0);
 
-        // Decode eight packed little-endian ASCII digits to their integer value.
-        // From https://lemire.me/blog/2022/01/21/swar-explained-parsing-eight-digits/
-        private static long decode8digits(long val) {
-            final long mask = 0x000000FF000000FFL;
-            final long mul1 = 0x000F424000000064L; // 100 + (1000000 << 32)
-            final long mul2 = 0x0000271000000001L; // 1 + (10000 << 32)
-            val -= 0x3030303030303030L;
-            val = (val * 10) + (val >>> 8);
-            val = (((val & mask) * mul1) + (((val >>> 16) & mask) * mul2)) >>> 32;
-            return val;
-        }
+            // Ryu has rounding issues with subnormals around 1e-310 (< 2.225e-308)
+            if (mantissa_digits > 17 || mantissa_digits + exponent < -307) {
+                return RubyFloat.newFloat(context.runtime, Double.parseDouble(new String(data, start, cursor - start)));
+            }
 
-        // Decode four packed little-endian ASCII digits to their integer value.
-        private static long decode4digits(int val) {
-            val -= 0x30303030;
-            val = (val * 10) + (val >>> 8);
-            return ((val & 0xFF) * 100) + ((val >>> 16) & 0xFF);
+            return RubyFloat.newFloat(context.runtime, ryuS2dFromParts(mantissa, mantissa_digits, (int) exponent, negative));
         }
 
         private IRubyObject parseString(boolean isName) {
@@ -829,6 +807,10 @@ public class Parser extends RubyObject {
 
         private byte peek() {
             return cursor < end ? data[cursor] : 0;
+        }
+        private byte advance() {
+            cursor++;
+            return peek();
         }
 
         private boolean matchKeyword(String keyword) {
