@@ -35,6 +35,7 @@ import java.util.Arrays;
 import java.util.function.BiFunction;
 
 import static org.jruby.util.ConvertDouble.DoubleConverter;
+import static org.jruby.util.StringSupport.CR_7BIT;
 
 /**
  * This is a port of the parser from the C extension.
@@ -299,8 +300,6 @@ public class Parser extends RubyObject {
 
             IRubyObject result = run();
 
-            // Only trailing whitespace (and comments) may follow the document.
-            eatWhitespace();
             if (cursor < end) {
                 throw unexpectedToken(cursor, end);
             }
@@ -311,12 +310,12 @@ public class Parser extends RubyObject {
             while (true) {
                 Frame frame = topFrame();
 
+                eatWhitespace();
                 switch (frame.phase) {
                     case DONE:
                         return valueStack[valueTop - 1];
 
                     case VALUE: {
-                        eatWhitespace();
                         IRubyObject value;
                         switch (peek()) {
                             case 'n':
@@ -398,7 +397,6 @@ public class Parser extends RubyObject {
                     }
 
                     case OBJECT_KEY: {
-                        eatWhitespace();
                         if (peek() == '"') {
                             pushValue(parseString(true));
                             frame.phase = FramePhase.OBJECT_COLON;
@@ -408,7 +406,6 @@ public class Parser extends RubyObject {
                     }
 
                     case OBJECT_COLON: {
-                        eatWhitespace();
                         if (peek() == ':') {
                             cursor++;
                             frame.phase = FramePhase.VALUE;
@@ -418,7 +415,6 @@ public class Parser extends RubyObject {
                     }
 
                     case ARRAY_COMMA: {
-                        eatWhitespace();
                         byte b = peek();
                         if (b == ',') {
                             cursor++;
@@ -445,7 +441,6 @@ public class Parser extends RubyObject {
                     }
 
                     case OBJECT_COMMA: {
-                        eatWhitespace();
                         byte b = peek();
                         if (b == ',') {
                             cursor++;
