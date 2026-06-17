@@ -265,7 +265,6 @@ public class Parser extends RubyObject {
 
         // Integer value accumulated by the most recent scanDigits() call.
         private long digitsValue;
-        private int currentNesting = 0;
 
         private int inArray = 0;
 
@@ -362,7 +361,6 @@ public class Parser extends RubyObject {
                                     value = decodeArray(0);
                                     break;
                                 }
-                                currentNesting++;
                                 checkNesting();
                                 inArray++;
                                 // Phase stays VALUE: the next iteration reads
@@ -379,7 +377,6 @@ public class Parser extends RubyObject {
                                     value = decodeObject(0);
                                     break;
                                 }
-                                currentNesting++;
                                 checkNesting();
                                 // Phase KEY: the next iteration reads the first key.
                                 pushFrame(FrameType.OBJECT, FramePhase.OBJECT_KEY, valueTop, objectStart);
@@ -430,7 +427,6 @@ public class Parser extends RubyObject {
                         } else if (b == ']') {
                             cursor++;
                             int count = entryCount(frame);
-                            currentNesting--;
                             inArray--;
                             popFrame();
                             pushValue(decodeArray(count));
@@ -455,7 +451,6 @@ public class Parser extends RubyObject {
                             continue;
                         } else if (b == '}') {
                             cursor++;
-                            currentNesting--;
                             int count = entryCount(frame);
                             // Temporarily rewind the cursor so a duplicate-key
                             // error points at the object's opening brace.
@@ -518,9 +513,9 @@ public class Parser extends RubyObject {
         }
 
         private void checkNesting() {
-            if (config.maxNesting > 0 && currentNesting > config.maxNesting) {
+            if (config.maxNesting > 0 && frameDepth > config.maxNesting) {
                 throw newException(Utils.M_NESTING_ERROR,
-                    "nesting of " + currentNesting + " is too deep");
+                    "nesting of " + (frameDepth - 1) + " is too deep");
             }
         }
 
